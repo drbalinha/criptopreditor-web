@@ -1,4 +1,4 @@
-# Arquivo: preditor.py (VERSAO FINAL v2 - Correcao de Permissao)
+# Arquivo: preditor.py (VERSAO FINAL v3 - Removendo o makedirs)
 
 import os
 import sys
@@ -10,13 +10,12 @@ from tensorflow.keras.layers import LSTM, Dense
 import joblib
 import json
 
-# --- CORRECAO ESTA AQUI ---
-# Usamos diretamente o caminho do disco montado, sem tentar criar uma subpasta que causa erro de permissao.
-# O proprio Render garante que este diretorio exista.
+# O caminho continua o mesmo
 MODEL_STORAGE_PATH = '/var/data' 
 
-# Garantimos que o caminho exista, o que eh seguro de fazer no /var/data
-os.makedirs(MODEL_STORAGE_PATH, exist_ok=True)
+# --- A LINHA PROBLEMÁTICA FOI REMOVIDA DAQUI ---
+# A linha "os.makedirs(MODEL_STORAGE_PATH, exist_ok=True)" foi deletada.
+# Vamos confiar que o Render ja criou o diretorio /var/data para nos.
 
 def create_dataset(dataset, look_back=60):
     dataX, dataY = [], []
@@ -29,7 +28,6 @@ def create_dataset(dataset, look_back=60):
 def run_prediction(symbol, allow_training=False):
     symbol_safe = symbol.replace('/', '_').replace('.', '')
     
-    # O caminho completo do arquivo agora eh construido corretamente
     model_path = os.path.join(MODEL_STORAGE_PATH, f'model_{symbol_safe}.h5')
     scaler_path = os.path.join(MODEL_STORAGE_PATH, f'scaler_{symbol_safe}.pkl')
     
