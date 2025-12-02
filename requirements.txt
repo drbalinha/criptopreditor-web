@@ -2,7 +2,6 @@ flask
 flask-cors 
 pandas 
 scikit-learn 
-tensorflow 
 ccxt 
 joblib 
 gunicorn
