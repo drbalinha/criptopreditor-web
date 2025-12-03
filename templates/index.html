@@ -26,11 +26,6 @@
             margin: 20px auto;
             padding: 10px;
         }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-        }
         .card {
             background: white;
             padding: 20px;
@@ -101,29 +96,29 @@ const results = document.getElementById("results");
 
 btn.onclick = async () => {
     btn.disabled = true;
-    status.innerHTML = "Analisando...";
-
+    status.innerHTML = "⚡ Analisando 20 moedas em paralelo...";
     results.innerHTML = "";
 
-    for (let coin of coins) {
-        try {
-            const r = await fetch(`/predict/${coin}`);
-            const data = await r.json();
+    // 🔥 REQUISIÇÕES PARALELAS
+    const promises = coins.map(coin => 
+        fetch(`/predict/${coin}`)
+            .then(r => r.json())
+            .catch(() => ({ error: "Erro de conexão", symbol: coin }))
+    );
 
-            if (data.error) {
-                results.innerHTML += `<div class="card"><h3>${coin}</h3><p class="red">${data.error}</p></div>`;
-                continue;
-            }
+    const allData = await Promise.all(promises);
 
+    // Renderizar todos os resultados
+    allData.forEach(data => {
+        if (data.error) {
+            results.innerHTML += `<div class="card"><h3>${data.symbol || "Desconhecido"}</h3><p class="red">${data.error}</p></div>`;
+        } else {
             renderCoinBlock(data);
             renderChart(data);
-
-        } catch (error) {
-            results.innerHTML += `<div class="card"><h3>${coin}</h3><p class="red">Erro de conexão.</p></div>`;
         }
-    }
+    });
 
-    status.innerHTML = "Concluído.";
+    status.innerHTML = "✅ Concluído.";
     btn.disabled = false;
 };
 
