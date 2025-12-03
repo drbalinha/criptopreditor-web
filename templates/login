@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Login</title>
+    <style>
+        body { font-family: Arial; background: #f4f4f4; padding: 30px; }
+        .box {
+            background: white;
+            width: 350px;
+            padding: 25px;
+            margin: auto;
+            border-radius: 12px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+        input, button {
+            width: 100%; padding: 12px; margin-top: 10px;
+            border-radius: 8px; border: 1px solid #ccc;
+        }
+        button { background: #2563eb; color: white; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2>Login</h2>
+
+    <form method="POST">
+        <input type="email" name="email" placeholder="E-mail" required>
+        <input type="password" name="password" placeholder="Senha" required>
+
+        <button type="submit">Entrar</button>
+    </form>
+
+    <p>Não tem conta? <a href="/register">Registrar</a></p>
+</div>
+
+</body>
+</html>
