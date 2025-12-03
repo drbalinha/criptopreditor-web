@@ -10,12 +10,18 @@ def index():
 @app.route('/predict/<path:symbol>', methods=['GET'])
 def predict_route(symbol):
     try:
-        result = preditor.run_prediction(symbol)
+        # Converte BTC/USDT → BTC_USDT para casar com os arquivos CSV
+        safe_symbol = symbol.replace("/", "_").replace(".", "")
+        
+        result = preditor.run_prediction(safe_symbol)
+        
         if "error" in result:
             return jsonify(result), 500
+
         return jsonify(result)
+
     except Exception as e:
         return jsonify({"error": f"Erro inesperado no servidor: {str(e)}"}), 500
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
