@@ -1,14 +1,22 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, redirect, session
 import os
 import pandas as pd
 import ccxt
 from supabase import create_client, Client
+import bcrypt
 import preditor
 
 
-# ========================================
-# SUPABASE CONFIG
-# ========================================
+# ======================================================
+# CONFIG FLASK SESSIONS
+# ======================================================
+app = Flask(__name__)
+app.secret_key = "chave-super-secreta-trocar-depois"
+
+
+# ======================================================
+# CONFIG SUPABASE
+# ======================================================
 SUPABASE_URL = "https://ocivodqbfezaouctqydq.supabase.co"
 SUPABASE_ANON_KEY = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
@@ -18,157 +26,157 @@ SUPABASE_ANON_KEY = (
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-app = Flask(__name__)
+
+# ======================================================
+# FUNÇÃO: REQUER LOGIN
+# ======================================================
+def require_login():
+    if "user" not in session:
+        return redirect("/login")
 
 
-# ========================================
-# FUNÇÕES AUXILIARES
-# ========================================
-
-def fetch_ohlcv(symbol, timeframe):
-    """Busca dados reais do Binance via CCXT."""
-    try:
-        exchange = ccxt.binance()
-        raw = exchange.fetch_ohlcv(symbol, timeframe, limit=500)
-
-        rows = []
-        for t, o, h, l, c, v in raw:
-            rows.append({
-                "timestamp": t,
-                "open": o,
-                "high": h,
-                "low": l,
-                "close": c,
-                "volume": v,
-            })
-        return rows
-    except Exception:
-        return []
-
-
-def save_to_supabase(symbol, timeframe, rows):
-    """Insere candles no Supabase."""
-    if not rows:
-        return False
-
-    safe = symbol.replace("/", "_")
-
-    for r in rows:
-        supabase.table("ohlc").insert({
-            "symbol": safe,
-            "timeframe": timeframe,
-            "timestamp": r["timestamp"],
-            "open": r["open"],
-            "high": r["high"],
-            "low": r["low"],
-            "close": r["close"],
-            "volume": r["volume"],
-        }).execute()
-
-    return True
-
-
+# ======================================================
+# FUNÇÃO: SALVA PREVISÕES
+# ======================================================
 def save_prediction(symbol, timeframe, horizon, real_price, predicted_price):
-    """Salva cada previsão (multi‑horizonte) no Supabase."""
     supabase.table("predictions").insert({
         "symbol": symbol,
         "timeframe": timeframe,
         "horizon": horizon,
         "timestamp": int(pd.Timestamp.utcnow().timestamp() * 1000),
         "real_price": real_price,
-        "predicted_price": predicted_price,
+        "predicted_price": predicted_price
     }).execute()
 
 
-# ========================================
-# ROTAS PRINCIPAIS
-# ========================================
+# ======================================================
+# LOGIN PAGE
+# ======================================================
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
 
+        email = request.form.get("email")
+        password = request.form.get("password")
+
+        user_query = supabase.table("users").select("*").eq("email", email).execute()
+        if not user_query.data:
+            return "Usuário não encontrado"
+
+        user = user_query.data[0]
+        hashed = user["password_hash"]
+
+        if bcrypt.checkpw(password.encode(), hashed.encode()):
+            session["user"] = email
+            return redirect("/")
+
+        return "Senha incorreta"
+
+    return render_template("login.html")
+
+
+# ======================================================
+# REGISTER PAGE
+# ======================================================
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+
+        email = request.form.get("email")
+        password = request.form.get("password")
+
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+        supabase.table("users").insert({
+            "email": email,
+            "password_hash": hashed
+        }).execute()
+
+        return redirect("/login")
+
+    return render_template("register.html")
+
+
+# ======================================================
+# LOGOUT
+# ======================================================
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+# ======================================================
+# PÁGINA PRINCIPAL (PROTEGIDA)
+# ======================================================
 @app.route("/")
 def index():
+    if "user" not in session:
+        return redirect("/login")
     return render_template("index.html")
 
 
+# ======================================================
+# HISTÓRICO (PROTEGIDO)
+# ======================================================
 @app.route("/history_page")
 def history_page():
+    if "user" not in session:
+        return redirect("/login")
     return render_template("history.html")
 
 
-# ========================================
-# PREDIÇÃO NORMAL (1 CANDLE)
-# ========================================
+# ======================================================
+# PREDIÇÃO 1 DIA
+# ======================================================
 @app.route("/predict/<path:symbol>", methods=["GET"])
 def predict_route(symbol):
-    try:
-        safe_symbol = symbol.replace("/", "_").replace(".", "")
-
-        result = preditor.run_prediction(safe_symbol)
-
-        if "error" in result:
-            return jsonify(result), 500
-
-        return jsonify(result)
-
-    except Exception as e:
-        return jsonify({"error": f"Erro inesperado no servidor: {str(e)}"}), 500
-
-
-# ========================================
-# PREDIÇÃO MULTI-HORIZONTE (1, 7, 30)
-# ========================================
-@app.route("/predict_multi/<path:symbol>", methods=["GET"])
-def multi_route(symbol):
-    try:
-        safe = symbol.replace("/", "_")
-        timeframe = "1d"
-
-        result = preditor.run_prediction(safe)
-
-        if "error" in result:
-            return jsonify(result), 500
-
-        # Salvar previsões no Supabase
-        current_price = result["current_price"]
-
-        save_prediction(safe, timeframe, 1, current_price, result["horizons"]["1"])
-        save_prediction(safe, timeframe, 7, current_price, result["horizons"]["7"])
-        save_prediction(safe, timeframe, 30, current_price, result["horizons"]["30"])
-
-        return jsonify(result)
-
-    except Exception as e:
-        return jsonify({"error": f"Erro inesperado: {str(e)}"}), 500
-
-
-# ========================================
-# HISTÓRICO DE PREDIÇÕES (USADO PELO PAINEL)
-# ========================================
-@app.route("/prediction_history/<path:symbol>", methods=["GET"])
-def prediction_history(symbol):
     safe = symbol.replace("/", "_")
 
-    query = (
-        supabase.table("predictions")
-        .select("*")
-        .eq("symbol", safe)
-        .order("timestamp", desc=False)
-        .execute()
-    )
+    result = preditor.run_prediction(safe)
 
-    return jsonify({"history": query.data})
+    return jsonify(result)
 
 
-# ========================================
-# HISTÓRICO OHLC MULTI-TIMEFRAME (BINANCE + SUPABASE)
-# ========================================
-@app.route("/history/<path:symbol>", methods=["GET"])
-def history_route(symbol):
+# ======================================================
+# PREDIÇÃO MULTI-HORIZONTE (1, 7, 30)
+# ======================================================
+@app.route("/predict_multi/<path:symbol>", methods=["GET"])
+def multi_route(symbol):
+    safe = symbol.replace("/", "_")
+    timeframe = "1d"
+
+    result = preditor.run_prediction(safe)
+
+    current_price = result["current_price"]
+
+    save_prediction(safe, timeframe, 1, current_price, result["horizons"]["1"])
+    save_prediction(safe, timeframe, 7, current_price, result["horizons"]["7"])
+    save_prediction(safe, timeframe, 30, current_price, result["horizons"]["30"])
+
+    return jsonify(result)
+
+
+# ======================================================
+# HISTÓRICO DE PREVISÕES
+# ======================================================
+@app.route("/prediction_history/<path:symbol>")
+def prediction_history(symbol):
+    safe = symbol.replace("/", "_")
+    q = supabase.table("predictions").select("*").eq("symbol", safe).execute()
+    return jsonify({"history": q.data})
+
+
+# ======================================================
+# HISTÓRICO OHLC MULTI-TIMEFRAME
+# ======================================================
+@app.route("/history/<path:symbol>")
+def history(symbol):
 
     timeframe = request.args.get("tf", "1d")
-    safe = symbol.replace("/", "_").replace(".", "")
+    safe = symbol.replace("/", "_")
 
-    # Buscar no Supabase
-    query = (
+    q = (
         supabase.table("ohlc")
         .select("*")
         .eq("symbol", safe)
@@ -177,15 +185,13 @@ def history_route(symbol):
         .execute()
     )
 
-    data = query.data
+    data = q.data
 
-    # Se não existir, busca na Binance e grava
     if not data:
         rows = fetch_ohlcv(symbol, timeframe)
-        if rows:
-            save_to_supabase(symbol, timeframe, rows)
+        save_to_supabase(symbol, timeframe, rows)
 
-        query = (
+        q = (
             supabase.table("ohlc")
             .select("*")
             .eq("symbol", safe)
@@ -193,14 +199,10 @@ def history_route(symbol):
             .order("timestamp", desc=False)
             .execute()
         )
-        data = query.data
-
-    if not data:
-        return jsonify({"history": []})
+        data = q.data
 
     df = pd.DataFrame(data)
     df = df.sort_values("timestamp")
-
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
     df["sma7"] = df["close"].rolling(7).mean()
     df["sma30"] = df["close"].rolling(30).mean()
@@ -224,15 +226,11 @@ def history_route(symbol):
             "rsi14": None if pd.isna(r["rsi14"]) else float(r["rsi14"]),
         })
 
-    return jsonify({
-        "symbol": symbol,
-        "timeframe": timeframe,
-        "history": history
-    })
+    return jsonify({"history": history})
 
 
-# ========================================
-# EXECUTAR SERVIDOR LOCAL
-# ========================================
+# ======================================================
+# RUN
+# ======================================================
 if __name__ == "__main__":
     app.run()
