@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Registrar</title>
+    <style>
+        body { font-family: Arial; background: #f4f4f4; padding: 30px; }
+        .box {
+            background: white; width: 350px; padding: 25px; margin: auto;
+            border-radius: 12px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+        input, button {
+            width: 100%; padding: 12px; margin-top: 10px;
+            border-radius: 8px; border: 1px solid #ccc;
+        }
+        button { background: #10b981; color: white; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2>Registrar</h2>
+
+    <form method="POST">
+        <input type="email" name="email" placeholder="E-mail" required>
+        <input type="password" name="password" placeholder="Senha" required>
+
+        <button type="submit">Criar Conta</button>
+    </form>
+
+    <p>Já tem conta? <a href="/login">Fazer login</a></p>
+</div>
+
+</body>
+</html>
