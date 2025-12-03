@@ -37,8 +37,10 @@
             border-radius: 12px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.08);
         }
-        canvas {
-            margin-top: 20px;
+        .chart-container {
+            position: relative;
+            height: 200px;
+            margin-top: 15px;
         }
         .btn {
             width: 100%;
@@ -51,8 +53,23 @@
             cursor: pointer;
             margin-bottom: 20px;
         }
-        .green { color: #10b981; }
-        .red { color: #ef4444; }
+        .btn:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .green { color: #10b981; font-weight: 600; }
+        .red { color: #ef4444; font-weight: 600; }
+        #status {
+            text-align: center;
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: #6b7280;
+        }
+        #results {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
     </style>
 </head>
 
@@ -93,11 +110,16 @@ btn.onclick = async () => {
             const r = await fetch(`/predict/${coin}`);
             const data = await r.json();
 
+            if (data.error) {
+                results.innerHTML += `<div class="card"><h3>${coin}</h3><p class="red">${data.error}</p></div>`;
+                continue;
+            }
+
             renderCoinBlock(data);
             renderChart(data);
 
         } catch (error) {
-            results.innerHTML += `<div class="card"><h3>${coin}</h3><p class="red">Erro.</p></div>`;
+            results.innerHTML += `<div class="card"><h3>${coin}</h3><p class="red">Erro de conexão.</p></div>`;
         }
     }
 
@@ -116,11 +138,13 @@ function renderCoinBlock(data) {
             <h2>${data.symbol}</h2>
             <p><strong>Atual:</strong> $${data.current_price}</p>
             <p class="${dirColor}">
-                <strong>Previsto:</strong> $${data.predicted_price_1} ${arrow}
+                <strong>Previsto (1d):</strong> $${data.predicted_price_1} ${arrow}
             </p>
             <p><strong>Confiança:</strong> ${data.prediction_confidence}%</p>
 
-            <canvas id="chart_${idChart}" height="180"></canvas>
+            <div class="chart-container">
+                <canvas id="chart_${idChart}"></canvas>
+            </div>
         </div>
     `;
 }
@@ -134,9 +158,9 @@ function renderChart(data) {
     new Chart(ctx, {
         type: 'line',
         data: {
-            labels: ['Atual', 'H1', 'H7', 'H30'],
+            labels: ['Atual', '1 dia', '7 dias', '30 dias'],
             datasets: [{
-                label: 'Previsão',
+                label: 'Previsão Multi-Horizonte',
                 data: [
                     data.current_price,
                     data.horizons["1"],
@@ -144,13 +168,25 @@ function renderChart(data) {
                     data.horizons["30"]
                 ],
                 borderColor: '#2563eb',
+                backgroundColor: 'rgba(37, 99, 235, 0.1)',
                 borderWidth: 2,
-                fill: false
+                fill: true,
+                tension: 0.4
             }]
         },
         options: {
             responsive: true,
-            maintainAspectRatio: false
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false
+                }
+            }
         }
     });
 }
