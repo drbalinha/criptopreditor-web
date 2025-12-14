@@ -1,98 +1,462 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
-    <meta charset="utf-8">
-    <title>Histórico de Predições</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Histórico de Predições - Dashboard Cripto</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial;
-            background: #f4f4f4;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             padding: 20px;
         }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            color: #667eea;
+            font-size: 2em;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-danger {
+            background: #ff4757;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #ff3838;
+        }
+
         .card {
             background: white;
-            padding: 20px;
-            border-radius: 14px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        label {
+            color: #666;
+            font-weight: 600;
+            font-size: 1em;
+        }
+
         select {
-            padding: 10px;
-            font-size: 16px;
+            padding: 12px 15px;
+            font-size: 1em;
             border-radius: 8px;
+            border: 2px solid #e0e0e0;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-width: 200px;
+        }
+
+        select:hover {
+            border-color: #667eea;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-top: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                gap: 20px;
+                text-align: center;
+            }
+
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            select {
+                min-width: 100%;
+            }
         }
     </style>
 </head>
 
 <body>
+    <div class="container">
+        <header>
+            <h1>
+                <span>📊</span>
+                Histórico de Predições
+            </h1>
+            <div class="user-info">
+                <span class="user-email">👤 {{ user_email }}</span>
+                <a href="/" class="btn btn-secondary">🏠 Dashboard</a>
+                <a href="/logout" class="btn btn-danger">🚪 Sair</a>
+            </div>
+        </header>
 
-<h2>Histórico de Predições — Real x Previsto</h2>
+        <div class="card">
+            <h2>Comparação: Real x Previsto</h2>
+            <div class="controls">
+                <label for="symbolSelect">Selecione o ativo:</label>
+                <select id="symbolSelect">
+                    <option value="BTC/USDT">BTC/USDT</option>
+                    <option value="ETH/USDT">ETH/USDT</option>
+                    <option value="XRP/USDT">XRP/USDT</option>
+                    <option value="LTC/USDT">LTC/USDT</option>
+                    <option value="BCH/USDT">BCH/USDT</option>
+                    <option value="ADA/USDT">ADA/USDT</option>
+                    <option value="DOGE/USDT">DOGE/USDT</option>
+                    <option value="DOT/USDT">DOT/USDT</option>
+                    <option value="UNI/USDT">UNI/USDT</option>
+                    <option value="LINK/USDT">LINK/USDT</option>
+                    <option value="SOL/USDT">SOL/USDT</option>
+                    <option value="MATIC/USDT">MATIC/USDT</option>
+                    <option value="ETC/USDT">ETC/USDT</option>
+                    <option value="FIL/USDT">FIL/USDT</option>
+                    <option value="AAVE/USDT">AAVE/USDT</option>
+                    <option value="MKR/USDT">MKR/USDT</option>
+                    <option value="COMP/USDT">COMP/USDT</option>
+                    <option value="SNX/USDT">SNX/USDT</option>
+                    <option value="YFI/USDT">YFI/USDT</option>
+                    <option value="AVAX/USDT">AVAX/USDT</option>
+                </select>
+            </div>
 
-<div class="card">
-    <label>Selecione o ativo:</label>
-    <select id="symbolSelect">
-        <option>BTC_USDT</option>
-        <option>ETH_USDT</option>
-        <option>XRP_USDT</option>
-    </select>
-</div>
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Carregando histórico...</p>
+            </div>
 
-<div class="card">
-    <canvas id="chartHistory"></canvas>
-</div>
+            <div id="errorContainer"></div>
 
-<script>
-async function loadHistory(symbol){
-    const r = await fetch(`/prediction_history/${symbol}`);
-    const j = await r.json();
-    return j.history;
-}
+            <div class="chart-container">
+                <canvas id="chartHistory"></canvas>
+            </div>
+        </div>
+    </div>
 
-const ctx = document.getElementById("chartHistory");
+    <script>
+        const symbolSelect = document.getElementById('symbolSelect');
+        const chartCanvas = document.getElementById('chartHistory');
+        const loadingDiv = document.getElementById('loading');
+        const errorContainer = document.getElementById('errorContainer');
 
-let chart = null;
+        let chart = null;
 
-async function renderChart(){
-    const symbol = document.getElementById("symbolSelect").value;
-    const data = await loadHistory(symbol);
+        async function loadHistory(symbol) {
+            try {
+                loadingDiv.style.display = 'block';
+                errorContainer.innerHTML = '';
 
-    const ts = data.map(x => new Date(Number(x.timestamp)));
-    const real = data.map(x => x.real_price);
-    const pred = data.map(x => x.predicted_price);
+                // Converter BTC/USDT para BTC_USDT
+                const symbolFile = symbol.replace('/', '_');
 
-    if (chart) chart.destroy();
+                const response = await fetch(`/history/${symbolFile}`);
 
-    chart = new Chart(ctx, {
-        type: "line",
-        data: {
-            labels: ts,
-            datasets: [
-                {
-                    label: "Preço Real",
-                    data: real,
-                    borderColor: "#2563eb",
-                    borderWidth: 2
-                },
-                {
-                    label: "Previsto",
-                    data: pred,
-                    borderColor: "#ef4444",
-                    borderWidth: 2
+                if (!response.ok) {
+                    throw new Error(`Erro ${response.status}: ${response.statusText}`);
                 }
-            ]
-        },
-        options: {
-            responsive: true
+
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                loadingDiv.style.display = 'none';
+                return data.history || [];
+
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                errorContainer.innerHTML = `<div class="error">❌ Erro ao carregar histórico: ${error.message}</div>`;
+                console.error('Erro ao carregar histórico:', error);
+                return [];
+            }
         }
-    })
-}
 
-document.getElementById("symbolSelect").onchange = renderChart;
+        async function renderChart() {
+            const symbol = symbolSelect.value;
+            const history = await loadHistory(symbol);
 
-renderChart();
-</script>
+            if (!history || history.length === 0) {
+                errorContainer.innerHTML = '<div class="error">⚠️ Nenhum histórico disponível para este ativo ou erro na API.</div>';
+                if (chart) {
+                    chart.destroy();
+                    chart = null;
+                }
+                return;
+            }
+
+            // O backend retorna timestamp em segundos, Chart.js espera milissegundos
+            const labels = history.map(x => new Date(x.timestamp * 1000));
+            const realPrices = history.map(x => parseFloat(x.close));
+            const volumes = history.map(x => parseFloat(x.volume));
+
+            if (chart) {
+                chart.destroy();
+            }
+
+            chart = new Chart(chartCanvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Preço Real (USDT)',
+                            data: realPrices,
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            borderWidth: 3,
+                            tension: 0.4,
+                            fill: true,
+                            pointRadius: 4,
+                            pointHoverRadius: 6,
+                            pointBackgroundColor: '#667eea',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Volume (USDT)',
+                            data: volumes,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: false,
+                            pointRadius: 3,
+                            pointHoverRadius: 5,
+                            pointBackgroundColor: '#f59e0b',
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                font: {
+                                    size: 12,
+                                    weight: 'bold'
+                                },
+                                padding: 15,
+                                usePointStyle: true
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                            padding: 12,
+                            titleFont: {
+                                size: 13,
+                                weight: 'bold'
+                            },
+                            bodyFont: {
+                                size: 12
+                            },
+                            callbacks: {
+                                title: function(tooltipItems) {
+                                    return new Date(tooltipItems[0].label).toLocaleDateString('pt-BR', {
+                                        year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                    });
+                                },
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.dataset.yAxisID === 'y') {
+                                        label += `R$ ${context.parsed.y.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                                    } else {
+                                        label += `${context.parsed.y.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM dd'
+                                }
+                            },
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                font: {
+                                    size: 11
+                                }
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Preço (USDT)',
+                                font: {
+                                    weight: 'bold'
+                                }
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return 'R$ ' + value.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                                },
+                                font: {
+                                    size: 11
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Volume (USDT)',
+                                font: {
+                                    weight: 'bold'
+                                }
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString('pt-BR', {notation: 'compact', compactDisplay: 'short'});
+                                },
+                                font: {
+                                    size: 11
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        symbolSelect.addEventListener('change', renderChart);
+        // Renderiza o gráfico inicial ao carregar a página
+        renderChart();
+    </script>
 
 </body>
 </html>
