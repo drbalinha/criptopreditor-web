@@ -1,315 +1,347 @@
-from flask import Flask, render_template, jsonify, request, redirect, session
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from functools import wraps
 import os
+from dotenv import load_dotenv
+from preditor import get_prediction
+from news_fetcher import fetch_crypto_news
+from sentiment import analyze_news_sentiment
 import pandas as pd
-import ccxt
-from supabase import create_client, Client
-import bcrypt
-import preditor
-from datetime import datetime, timedelta
+import json
+from datetime import datetime
+import requests
 
+load_dotenv()
 
-# 
-# CACHE DE PREDIÇÕES (5 minutos)
-# 
-prediction_cache = {}
-CACHE_DURATION = timedelta(minutes=5)
-
-def get_cached_prediction(symbol):
-    if symbol in prediction_cache:
-        cached_data, cached_time = prediction_cache[symbol]
-        if datetime.now() - cached_time < CACHE_DURATION:
-            return cached_data
-    return None
-
-def set_cached_prediction(symbol, data):
-    prediction_cache[symbol] = (data, datetime.now())
-
-
-# 
-# CONFIG FLASK SESSIONS
-# 
 app = Flask(__name__)
-app.secret_key = "chave-super-secreta-trocar-depois"
+app.secret_key = os.getenv('SECRET_KEY', 'sua_chave_secreta_aqui')
+
+# Usuários mockados (em produção, usar banco de dados)
+USERS = {
+    'admin@example.com': 'admin123',
+    'user@example.com': 'user123'
+}
+
+# Taxa de câmbio (em produção, buscar em tempo real)
+USD_TO_BRL = 5.44
+
+# Moedas para análise
+TOP_COINS = [
+    'BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'LTC/USDT', 'BCH/USDT',
+    'ADA/USDT', 'DOGE/USDT', 'DOT/USDT', 'UNI/USDT', 'LINK/USDT',
+    'SOL/USDT', 'MATIC/USDT', 'ETC/USDT', 'FIL/USDT', 'AAVE/USDT',
+    'MKR/USDT', 'COMP/USDT', 'SNX/USDT', 'YFI/USDT', 'AVAX/USDT'
+]
 
 
-# 
-# CONFIG SUPABASE
-# 
-SUPABASE_URL = "https://ocivodqbfezaouctqydq.supabase.co"
-SUPABASE_ANON_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jaXZvZHFiZmV6YW91Y3RxeWRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3MTQ5NjcsImV4cCI6MjA4MDI5MDk2N30."
-    "nCErkNisbwxUGH_5NDSY_4IGFw5frV13FHWx-orvOGU"
-)
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+def login_required(f):
+    """Decorator para verificar se usuário está logado"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
-# 
-# FUNÇÃO: SALVA PREVISÕES
-# 
-def save_prediction(symbol, timeframe, horizon, real_price, predicted_price):
-    supabase.table("predictions").insert({
-        "symbol": symbol,
-        "timeframe": timeframe,
-        "horizon": horizon,
-        "timestamp": int(pd.Timestamp.utcnow().timestamp() * 1000),
-        "real_price": real_price,
-        "predicted_price": predicted_price
-    }).execute()
-
-
-# 
-# FUNÇÃO: BUSCAR OHLC
-# 
-def fetch_ohlcv(symbol, timeframe):
-    try:
-        exchange = ccxt.binance()
-        raw = exchange.fetch_ohlcv(symbol, timeframe, limit=500)
-
-        rows = []
-        for t, o, h, l, c, v in raw:
-            rows.append({
-                "timestamp": t,
-                "open": o,
-                "high": h,
-                "low": l,
-                "close": c,
-                "volume": v,
-            })
-        return rows
-    except Exception:
-        return []
-
-
-# 
-# FUNÇÃO: SALVAR NO SUPABASE
-# 
-def save_to_supabase(symbol, timeframe, rows):
-    if not rows:
-        return False
-
-    safe = symbol.replace("/", "_")
-
-    for r in rows:
-        supabase.table("ohlc").insert({
-            "symbol": safe,
-            "timeframe": timeframe,
-            "timestamp": r["timestamp"],
-            "open": r["open"],
-            "high": r["high"],
-            "low": r["low"],
-            "close": r["close"],
-            "volume": r["volume"],
-        }).execute()
-
-    return True
-
-
-# 
-# LOGIN PAGE
-# 
-@app.route("/login", methods=["GET", "POST"])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == "POST":
-
-        email = request.form.get("email")
-        password = request.form.get("password")
-
-        user_query = supabase.table("users").select("*").eq("email", email).execute()
-        if not user_query.data:
-            return "Usuário não encontrado"
-
-        user = user_query.data[0]
-        hashed = user["password_hash"]
-
-        if bcrypt.checkpw(password.encode(), hashed.encode()):
-            session["user"] = email
-            return redirect("/")
-
-        return "Senha incorreta"
-
-    return render_template("login.html")
+    """Rota de login"""
+    if request.method == 'POST':
+        data = request.get_json()
+        email = data.get('email')
+        password = data.get('password')
+        
+        # Validar credenciais
+        if email in USERS and USERS[email] == password:
+            session['user'] = {'email': email}
+            return jsonify({'success': True, 'message': 'Login realizado com sucesso!'})
+        else:
+            return jsonify({'success': False, 'message': 'Email ou senha inválidos'}), 401
+    
+    return render_template('login.html')
 
 
-# 
-# REGISTER PAGE
-# 
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    if request.method == "POST":
-
-        email = request.form.get("email")
-        password = request.form.get("password")
-
-        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-        supabase.table("users").insert({
-            "email": email,
-            "password_hash": hashed
-        }).execute()
-
-        return redirect("/login")
-
-    return render_template("register.html")
-
-
-# 
-# LOGOUT
-# 
-@app.route("/logout")
+@app.route('/logout')
 def logout():
+    """Rota de logout"""
     session.clear()
-    return redirect("/login")
+    return redirect(url_for('login'))
 
 
-# 
-# PÁGINA PRINCIPAL (PROTEGIDA)
-# 
-@app.route("/")
+@app.route('/')
+@login_required
 def index():
-    if "user" not in session:
-        return redirect("/login")
-    return render_template("index.html")
+    """Dashboard principal"""
+    user_email = session['user']['email']
+    return render_template('index.html', user_email=user_email, usd_rate=USD_TO_BRL)
 
 
-# 
-# HISTÓRICO (PROTEGIDO)
-# 
-@app.route("/history_page")
-def history_page():
-    if "user" not in session:
-        return redirect("/login")
-    return render_template("history.html")
+@app.route('/history')
+@login_required
+def history():
+    """Página de histórico"""
+    user_email = session['user']['email']
+    return render_template('history.html', user_email=user_email, usd_rate=USD_TO_BRL)
 
 
-# 
-# PREDIÇÃO 1 DIA (COM CACHE)
-# 
-@app.route("/predict/<path:symbol>", methods=["GET"])
-def predict_route(symbol):
-    safe = symbol.replace("/", "_")
-
-    # Verificar cache
-    cached = get_cached_prediction(safe)
-    if cached:
-        return jsonify(cached)
-
-    # Gerar nova predição
-    result = preditor.run_prediction(safe)
-
-    # Salvar no cache
-    if "error" not in result:
-        set_cached_prediction(safe, result)
-
-    return jsonify(result)
-
-
-# 
-# PREDIÇÃO MULTI-HORIZONTE (1, 7, 30)
-# 
-@app.route("/predict_multi/<path:symbol>", methods=["GET"])
-def multi_route(symbol):
-    safe = symbol.replace("/", "_")
-    timeframe = "1d"
-
-    # Verificar cache
-    cached = get_cached_prediction(safe)
-    if cached:
-        return jsonify(cached)
-
-    result = preditor.run_prediction(safe)
-
-    if "error" in result:
-        return jsonify(result), 500
-
-    # Salvar previsões no Supabase
-    current_price = result["current_price"]
-
-    save_prediction(safe, timeframe, 1, current_price, result["horizons"]["1"])
-    save_prediction(safe, timeframe, 7, current_price, result["horizons"]["7"])
-    save_prediction(safe, timeframe, 30, current_price, result["horizons"]["30"])
-
-    # Salvar no cache
-    set_cached_prediction(safe, result)
-
-    return jsonify(result)
+@app.route('/api/analyze', methods=['POST'])
+@login_required
+def analyze():
+    """API para analisar top 20 moedas com sentimento"""
+    try:
+        print("\n" + "="*60)
+        print("🔮 INICIANDO ANÁLISE DE TOP 20 MOEDAS")
+        print("="*60)
+        
+        results = []
+        
+        for i, symbol in enumerate(TOP_COINS, 1):
+            print(f"\n[{i}/20] Analisando {symbol}...")
+            
+            try:
+                # Obter predição completa
+                prediction = get_prediction(symbol)
+                
+                if prediction and 'error' not in prediction:
+                    results.append(prediction)
+                    print(f"✅ {symbol} analisado com sucesso")
+                else:
+                    print(f"⚠️ Erro ao analisar {symbol}")
+            
+            except Exception as e:
+                print(f"❌ Erro ao processar {symbol}: {str(e)}")
+                continue
+        
+        print(f"\n{'='*60}")
+        print(f"✅ ANÁLISE COMPLETA! {len(results)} moedas processadas")
+        print(f"{'='*60}\n")
+        
+        return jsonify({
+            'success': True,
+            'data': results,
+            'timestamp': datetime.now().isoformat(),
+            'usd_rate': USD_TO_BRL
+        })
+    
+    except Exception as e:
+        print(f"❌ ERRO NA ANÁLISE: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
-# 
-# HISTÓRICO DE PREVISÕES
-# 
-@app.route("/prediction_history/<path:symbol>")
-def prediction_history(symbol):
-    safe = symbol.replace("/", "_")
-    q = supabase.table("predictions").select("*").eq("symbol", safe).execute()
-    return jsonify({"history": q.data})
+@app.route('/api/sentiment/<symbol>', methods=['GET'])
+@login_required
+def get_sentiment(symbol):
+    """API para obter sentimento de uma moeda específica"""
+    try:
+        # Buscar notícias
+        news_list = fetch_crypto_news(symbol, limit=10)
+        
+        # Analisar sentimento
+        sentiment_analysis = analyze_news_sentiment(news_list)
+        
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'sentiment': sentiment_analysis,
+            'news': news_list[:5],
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        print(f"❌ Erro ao obter sentimento: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
-# 
-# HISTÓRICO OHLC MULTI-TIMEFRAME
-# 
-@app.route("/history/<path:symbol>")
-def history(symbol):
+@app.route('/api/news/<symbol>', methods=['GET'])
+@login_required
+def get_news(symbol):
+    """API para obter notícias de uma moeda"""
+    try:
+        limit = request.args.get('limit', 10, type=int)
+        news_list = fetch_crypto_news(symbol, limit=limit)
+        
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'news': news_list,
+            'count': len(news_list),
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        print(f"❌ Erro ao obter notícias: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
-    timeframe = request.args.get("tf", "1d")
-    safe = symbol.replace("/", "_")
 
-    q = (
-        supabase.table("ohlc")
-        .select("*")
-        .eq("symbol", safe)
-        .eq("timeframe", timeframe)
-        .order("timestamp", desc=False)
-        .execute()
-    )
-
-    data = q.data
-
-    if not data:
-        rows = fetch_ohlcv(symbol, timeframe)
-        save_to_supabase(symbol, timeframe, rows)
-
-        q = (
-            supabase.table("ohlc")
-            .select("*")
-            .eq("symbol", safe)
-            .eq("timeframe", timeframe)
-            .order("timestamp", desc=False)
-            .execute()
-        )
-        data = q.data
-
-    df = pd.DataFrame(data)
-    df = df.sort_values("timestamp")
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df["sma7"] = df["close"].rolling(7).mean()
-    df["sma30"] = df["close"].rolling(30).mean()
-
-    delta = df["close"].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    RS = gain / loss
-    df["rsi14"] = 100 - (100 / (1 + RS))
-
-    history = []
-    for _, r in df.iterrows():
-        history.append({
-            "timestamp": str(r["timestamp"]),
-            "open": r["open"],
-            "high": r["high"],
-            "low": r["low"],
-            "close": r["close"],
-            "sma7": None if pd.isna(r["sma7"]) else float(r["sma7"]),
-            "sma30": None if pd.isna(r["sma30"]) else float(r["sma30"]),
-            "rsi14": None if pd.isna(r["rsi14"]) else float(r["rsi14"]),
+@app.route('/api/usd-rate', methods=['GET'])
+@login_required
+def get_usd_rate():
+    """API para obter taxa USD/BRL em tempo real"""
+    try:
+        # Tentar obter taxa da API gratuita
+        try:
+            response = requests.get('https://api.exchangerate-api.com/v4/latest/USD', timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                usd_to_brl = float(data['rates'].get('BRL', 5.44))
+                
+                return jsonify({
+                    'success': True,
+                    'usd_rate': float(usd_to_brl),
+                    'timestamp': datetime.now().isoformat(),
+                    'source': 'exchangerate-api.com'
+                })
+        except Exception as e:
+            print(f"⚠️ API 1 falhou: {str(e)}")
+        
+        # Fallback: tentar outra API
+        try:
+            response = requests.get('https://api.exchangerate.host/latest?base=USD&symbols=BRL', timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                usd_to_brl = float(data['rates'].get('BRL', 5.44))
+                
+                return jsonify({
+                    'success': True,
+                    'usd_rate': float(usd_to_brl),
+                    'timestamp': datetime.now().isoformat(),
+                    'source': 'exchangerate.host'
+                })
+        except Exception as e:
+            print(f"⚠️ API 2 falhou: {str(e)}")
+        
+        # Fallback: tentar API do Banco Central (mais precisa)
+        try:
+            response = requests.get('https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json', timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if data and len(data) > 0:
+                    usd_to_brl = float(data[0]['valor'])
+                    
+                    return jsonify({
+                        'success': True,
+                        'usd_rate': float(usd_to_brl),
+                        'timestamp': datetime.now().isoformat(),
+                        'source': 'Banco Central do Brasil'
+                    })
+        except Exception as e:
+            print(f"⚠️ API Banco Central falhou: {str(e)}")
+        
+        # Se todas falharem, retornar valor padrão
+        print("⚠️ Todas as APIs falharam, usando valor padrão")
+        return jsonify({
+            'success': True,
+            'usd_rate': 5.44,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'default'
+        })
+    
+    except Exception as e:
+        print(f"❌ Erro ao obter cotação: {str(e)}")
+        return jsonify({
+            'success': True,
+            'usd_rate': 5.44,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'default'
         })
 
-    return jsonify({"history": history})
+
+@app.route('/history/<symbol>', methods=['GET'])
+@login_required
+def get_history(symbol):
+    """API para obter histórico de uma moeda"""
+    try:
+        symbol_file = symbol.replace('/', '_')
+        file_path = f'Historico_Moedas/historico_{symbol_file}.csv'
+        
+        if not os.path.exists(file_path):
+            return jsonify({
+                'success': False,
+                'error': f'Histórico não encontrado para {symbol}'
+            }), 404
+        
+        # Ler arquivo CSV
+        df = pd.read_csv(file_path)
+        
+        # Converter para JSON
+        history_data = {
+            'symbol': symbol,
+            'data': df.to_dict('records'),
+            'count': len(df),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify({
+            'success': True,
+            'history': history_data
+        })
+    
+    except Exception as e:
+        print(f"❌ Erro ao obter histórico: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
-# 
-# RUN
-# 
-if __name__ == "__main__":
-    app.run()
+@app.route('/api/market-sentiment', methods=['GET'])
+@login_required
+def get_market_sentiment():
+    """API para obter sentimento geral do mercado"""
+    try:
+        from news_fetcher import fetch_market_news
+        
+        # Buscar notícias do mercado
+        market_news = fetch_market_news(limit=10)
+        
+        # Analisar sentimento
+        sentiment_analysis = analyze_news_sentiment(market_news)
+        
+        return jsonify({
+            'success': True,
+            'market_sentiment': sentiment_analysis,
+            'news': market_news[:5],
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        print(f"❌ Erro ao obter sentimento do mercado: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.errorhandler(404)
+def not_found(error):
+    """Página não encontrada"""
+    return jsonify({'error': 'Página não encontrada'}), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Erro interno do servidor"""
+    return jsonify({'error': 'Erro interno do servidor'}), 500
+
+
+if __name__ == '__main__':
+    print("🚀 Iniciando Dashboard Cripto ML...")
+    print(f"📊 Taxa USD/BRL: R$ {USD_TO_BRL}")
+    print(f"📈 Moedas para análise: {len(TOP_COINS)}")
+    print("\n🌐 Acesse: http://localhost:5000")
+    print("📧 Login: admin@example.com / admin123")
+    print("=" * 60)
+    
+    app.run(debug=True, host='0.0.0.0', port=5000)
